@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DonatPlus - Платформа для донатов</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Press Start 2P Font -->
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <!-- Font Awesome for Icons -->
+  <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
+  <!-- Google Analytics -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-XXXXXXXXXX');
+  </script>
+  <style>
+    body {
+      font-family: 'Press Start 2P', cursive;
+      background: linear-gradient(to bottom, #1A3C34, #000000);
+      color: #FFFFFF;
+      min-height: 100vh;
+    }
+    .neon-glow {
+      box-shadow: 0 0 10px #00FF00, 0 0 20px #00FF00, 0 0 30px #00FF00;
+    }
+    .pixel-pattern {
+      background-image: linear-gradient(rgba(0, 255, 0, 0.1) 1px, transparent 1px),
+                        linear-gradient(90deg, rgba(0, 255, 0, 0.1) 1px, transparent 1px);
+      background-size: 10px 10px;
+    }
+    .notification {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: #00FF00;
+      color: black;
+      padding: 10px 20px;
+      border-radius: 5px;
+      opacity: 0;
+      animation: fadeInOut 3s forwards;
+    }
+    @keyframes fadeInOut {
+      0% { opacity: 0; transform: translateY(-20px); }
+      20% { opacity: 1; transform: translateY(0); }
+      80% { opacity: 1; transform: translateY(0); }
+      100% { opacity: 0; transform: translateY(-20px); }
+    }
+    .chat-container {
+      max-height: 300px;
+      overflow-y: auto;
+      background: #1A3C34;
+      padding: 10px;
+      border-radius: 5px;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- React and ReactDOM -->
+  <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.development.js"></script>
+  <!-- Babel for JSX -->
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.22.5/babel.min.js"></script>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // Main App Component
+    const App = () => {
+      const [user, setUser] = useState(null);
+      const [page, setPage] = useState('home');
+      const [notification, setNotification] = useState(null);
+      const [messages, setMessages] = useState([]);
+      const audioRef = useRef(new Audio());
+
+      useEffect(() => {
+        const token = localStorage.getItem('token');
+        if (token) {
+          fetch('http://localhost:3000/me', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          })
+            .then(res => res.json())
+            .then(data => setUser(data))
+            .catch(() => localStorage.removeItem('token'));
+        }
+      }, []);
+
+      useEffect(() => {
+        if (user) {
+          const ws = new WebSocket('ws://localhost:8080');
+          ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.type === 'donation' && data.streamerId === user.id) {
+              setNotification(`Новый донат: ${data.amount} ₽ от ${data.message || 'Аноним'}`);
+              if (user.soundEffect) {
+                audioRef.current.src = `/sounds/${user.soundEffect}.mp3`;
+                audioRef.current.play().catch(() => console.log('Ошибка воспроизведения звука'));
+              }
+              setTimeout(() => setNotification(null), 3000);
+            } else if (data.type === 'message' && (data.to === user.id || data.from === user.id)) {
+              setMessages(prev => [...prev, data]);
+            }
+          };
+          return () => ws.close();
+        }
+      }, [user]);
+
+      const handleLogout = () => {
+        localStorage.removeItem('token');
+        setUser(null);
+        setPage('home');
+        setMessages([]);
+      };
+
+      const sendMessage = (to, content) => {
+        const ws = new WebSocket('ws://localhost:8080');
+        const message = { type: 'message', from: user.id, to, content, timestamp: new Date().toISOString() };
+        ws.onopen = () => {
+          ws.send(JSON.stringify(message));
+          setMessages(prev => [...prev, message]);
+        };
+      };
+
+      return (
+        <div className="flex flex-col min-h-screen">
+          {/* Header */}
+          <header className="bg-black bg-opacity-80 p-4 flex justify-between items-center">
+            <div className="text-2xl text-[#00FF00]">DonatPlus</div>
+            <nav className="hidden md:flex space-x-6">
+              <button onClick={() => setPage('home')} className="text-white hover:text-[#00FF00]">Главная</button>
+              {user ? (
+                <>
+                  <button onClick={() => setPage(user.role === 'streamer' ? 'dashboard' : 'donate')} className="text-white hover:text-[#00FF00]">
+                    {user.role === 'streamer' ? 'Кабинет' : 'Донат'}
+                  </button>
+                  <button onClick={handleLogout} className="text-white hover:text-[#00FF00]">Выйти</button>
+                </>
+              ) : (
+                <>
+                  <button onClick={() => setPage('register')} className="text-white hover:text-[#00FF00]">Регистрация</button>
+                  <button onClick={() => setPage('login')} className="text-white hover:text-[#00FF00]">Вход</button>
+                </>
+              )}
+            </nav>
+          </header>
+
+          {/* Notification */}
+          {notification && <div className="notification">{notification}</div>}
+
+          {/* Page Content */}
+          <main className="flex-1">
+            {page === 'home' && <HomePage setPage={setPage} />}
+            {page === 'register' && <RegisterPage setUser={setUser} setPage={setPage} />}
+            {page === 'login' && <LoginPage setUser={setUser} setPage={setPage} />}
+            {page === 'dashboard' && user && (
+              <StreamerDashboard user={user} setUser={setUser} messages={messages} sendMessage={sendMessage} />
+            )}
+            {page === 'donate' && user && (
+              <DonatePage user={user} messages={messages} sendMessage={sendMessage} />
+            )}
+            {page === 'widget' && <WidgetPage />}
+          </main>
+
+          {/* Footer */}
+          <footer className="bg-black bg-opacity-80 p-4 text-center">
+            <div className="text-[#00FF00] mb-2">DonatPlus</div>
+            <p className="text-sm">© 2025 DonatPlus. Все права защищены.</p>
+          </footer>
+        </div>
+      );
+    };
+
+    // Home Page
+    const HomePage = ({ setPage }) => (
+      <section className="flex items-center justify-center text-center py-20 pixel-pattern min-h-[80vh]">
+        <div>
+          <h1 className="text-4xl md:text-5xl text-[#00FF00] mb-4">DonatPlus</h1>
+          <p className="text-lg md:text-2xl mb-6">Донаты для стримеров на YouTube и Twitch</p>
+          <p className="text-md md:text-lg mb-8">Поддерживай любимых стримеров легко и безопасно</p>
+          <div className="flex justify-center space-x-4">
+            <button onClick={() => setPage('register')} className="bg-[#00FF00] text-black px-6 py-3 rounded neon-glow hover:scale-105 transition-transform">
+              Я стример
+            </button>
+            <button onClick={() => setPage('register')} className="bg-[#00FF00] text-black px-6 py-3 rounded neon-glow hover:scale-105 transition-transform">
+              Я подписчик
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+
+    // Register Page
+    const RegisterPage = ({ setUser, setPage }) => {
+      const [email, setEmail] = useState('');
+      const [password, setPassword] = useState('');
+      const [role, setRole] = useState('streamer');
+      const [error, setError] = useState('');
+
+      const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+      const handleRegister = async (e) => {
+        e.preventDefault();
+        if (!validateEmail(email)) {
+          setError('Введите корректный email');
+          return;
+        }
+        if (password.length < 6) {
+          setError('Пароль должен быть не менее 6 символов');
+          return;
+        }
+        setError('');
+        const res = await fetch('http://localhost:3000/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password, role }),
+        });
+        const data = await res.json();
+        if (res.status === 201) {
+          localStorage.setItem('token', data.token);
+          setUser(data.user);
+          setPage(role === 'streamer' ? 'dashboard' : 'donate');
+        } else {
+          setError('Ошибка регистрации');
+        }
+      };
+
+      return (
+        <section className="flex items-center justify-center py-20 min-h-[80vh]">
+          <div className="bg-[#1A3C34] p-8 rounded-lg neon-glow max-w-md w-full">
+            <h2 className="text-2xl text-[#00FF00] mb-6 text-center">Регистрация</h2>
+            {error && <p className="text-red-500 text-sm mb-4 text-center">{error}</p>}
+            <div className="space-y-4">
+              <input
+                type="email"
+                placeholder="Email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full p-3 bg-white text-black rounded"
+              />
+              <input
+                type="password"
+                placeholder="Пароль"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full p-3 bg-white text-black rounded"
+              />
+              <div className="flex justify-center space-x-4">
+                <button
+                  onClick={() => setRole('streamer')}
+                  className={`px-4 py-2 rounded hover:scale-105 transition-transform ${role === 'streamer' ? 'bg-[#00FF00] text-black' : 'bg-gray-500 text-white'}`}
+                >
+                  Я стример
+                </button>
+                <button
+                  onClick={() => setRole('subscriber')}
+                  className={`px-4 py-2 rounded hover:scale-105 transition-transform ${role === 'subscriber' ? 'bg-[#00FF00] text-black' : 'bg-gray-500 text-white'}`}
+                >
+                  Я подписчик
+                </button>
+              </div>
+              <button onClick={handleRegister} className="w-full bg-[#00FF00] text-black p-3 rounded neon-glow hover:scale-105 transition-transform">
+                Зарегистрироваться
+              </button>
+              <p className="text-center text-sm">
+                Уже есть аккаунт?{' '}
+                <button onClick={() => setPage('login')} className="text-[#00FF00] hover:underline">
+                  Войти
+                </button>
+              </p>
+            </div>
+          </div>
+        </section>
+      );
+    };
+
+    // Login Page
+    const LoginPage = ({ setUser, setPage }) => {
+      const [email, setEmail] = useState('');
+      const [password, setPassword] = useState('');
+      const [error, setError] = useState('');
+
+      const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+      const handleLogin = async (e) => {
+        e.preventDefault();
+        if (!validateEmail(email)) {
+          setError('Введите корректный email');
+          return;
+        }
+        setError('');
+        const res = await fetch('http://localhost:3000/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+        const data = await res.json();
+        if (res.status === 200) {
+          localStorage.setItem('token', data.token);
+          setUser(data.user);
+          setPage(data.user.role === 'streamer' ? 'dashboard' : 'donate');
+        } else {
+          setError('Неверный email или пароль');
+        }
+      };
+
+      return (
+        <section className="flex items-center justify-center py-20 min-h-[80vh]">
+          <div className="bg-[#1A3C34] p-8 rounded-lg neon-glow max-w-md w-full">
+            <h2 className="text-2xl text-[#00FF00] mb-6 text-center">Вход</h2>
+            {error && <p className="text-red-500 text-sm mb-4 text-center">{error}</p>}
+            <div className="space-y-4">
+              <input
+                type="email"
+                placeholder="Email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full p-3 bg-white text-black rounded"
+              />
+              <input
+                type="password"
+                placeholder="Пароль"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full p-3 bg-white text-black rounded"
+              />
+              <button onClick={handleLogin} className="w-full bg-[#00FF00] text-black p-3 rounded neon-glow hover:scale-105 transition-transform">
+                Войти
+              </button>
+              <p className="text-center text-sm">
+                Нет аккаунта?{' '}
+                <button onClick={() => setPage('register')} className="text-[#00FF00] hover:underline">
+                  Зарегистрироваться
+                </button>
+              </p>
+            </div>
+          </div>
+        </section>
+      );
+    };
+
+    // Streamer Dashboard
+    const StreamerDashboard = ({ user, setUser, messages, sendMessage }) => {
+      const [balance, setBalance] = useState(0);
+      const [history, setHistory] = useState([]);
+      const [profile, setProfile] = useState({ name: user.name || 'Стример', description: user.description || '', avatar: user.avatar || null });
+      const [isEditing, setIsEditing] = useState(false);
+      const [widgetSettings, setWidgetSettings] = useState({
+        textColor: user.textColor || '#00FF00',
+        backgroundColor: user.backgroundColor || 'transparent',
+        fontSize: user.fontSize || '24px',
+        soundEffect: user.soundEffect || 'coins',
+      });
+      const [chatMessage, setChatMessage] = useState('');
+      const chatRef = useRef(null);
+
+      useEffect(() => {
+        fetch('http://localhost:3000/donations', {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        })
+          .then(res => res.json())
+          .then(data => {
+            setHistory(data);
+            const total = data.reduce((sum, tx) => sum + tx.amount, 0);
+            setBalance(total);
+          });
+      }, []);
+
+      useEffect(() => {
+        if (chatRef.current) {
+          chatRef.current.scrollTop = chatRef.current.scrollHeight;
+        }
+      }, [messages]);
+
+      const handleProfileUpdate = async () => {
+        const res = await fetch('http://localhost:3000/profile', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          },
+          body: JSON.stringify({ ...profile, ...widgetSettings }),
+        });
+        if (res.status === 200) {
+          const updatedUser = await res.json();
+          setUser(updatedUser);
+          setIsEditing(false);
+          alert('Профиль обновлен!');
+        } else {
+          alert('Ошибка при обновлении профиля');
+        }
+      };
+
+      const handleAvatarChange = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            setProfile({ ...profile, avatar: reader.result });
+          };
+          reader.readAsDataURL(file);
+        }
+      };
+
+      const handleWidgetUpdate = () => {
+        handleProfileUpdate();
+        alert('Настройки виджета сохранены! Обновите виджет в OBS.');
+      };
+
+      const handleSendMessage = () => {
+        if (chatMessage.trim()) {
+          sendMessage(2, chatMessage);
+          setChatMessage('');
+        }
+      };
+
+      return (
+        <section className="py-20 px-4 min-h-[80vh]">
+          <div className="max-w-4xl mx-auto">
+            <h2 className="text-3xl text-[#00FF00] mb-6">Личный кабинет</h2>
+            
+            {/* Profile Section */}
+            <div className="bg-[#1A3C34] p-6 rounded-lg neon-glow mb-6">
+              <h3 className="text-xl text-[#00FF00] mb-4">Профиль</h3>
+              {isEditing ? (
+                <div className="space-y-4">
+                  <input
+                    type="text"
+                    placeholder="Имя"
+                    value={profile.name}
+                    onChange={(e) => setProfile({ ...profile, name: e.target.value })}
+                    className="w-full p-3 bg-white text-black rounded"
+                  />
+                  <textarea
+                    placeholder="Описание"
+                    value={profile.description}
+                    onChange={(e) => setProfile({ ...profile, description: e.target.value })}
+                    className="w-full p-3 bg-white text-black rounded"
+                  />
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleAvatarChange}
+                    className="w-full text-sm text-white"
+                  />
+                  <div className="flex justify-end space-x-4">
+                    <button onClick={() => setIsEditing(false)} className="bg-gray-500 text-white px-4 py-2 rounded">
+                      Отмена
+                    </button>
+                    <button onClick={handleProfileUpdate} className="bg-[#00FF00] text-black px-4 py-2 rounded neon-glow">
+                      Сохранить
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center space-x-4">
+                  <div className="w-16 h-16 rounded-full border-2 border-[#00FF00] flex items-center justify-center">
+                    {profile.avatar ? (
+                      <img src={profile.avatar} alt="Avatar" className="w-full h-full rounded-full object-cover" />
+                    ) : (
+                      <i className="fas fa-user text-2xl"></i>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-lg">{profile.name}</p>
+                    <p className="text-sm">{profile.description || 'Нет описания'}</p>
+                    <button onClick={() => setIsEditing(true)} className="mt-2 text-[#00FF00] hover:underline">
+                      Редактировать
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Balance Section */}
+            <div className="bg-[#1A3C34] p-6 rounded-lg neon-glow mb-6">
+              <div className="flex items-center space-x-4">
+                <i className="fas fa-coins text-[#00FF00] text-2xl"></i>
+                <p className="text-xl">Баланс: {balance} ₽</p>
+              </div>
+              <button className="mt-4 bg-[#00FF00] text-black px-4 py-2 rounded neon-glow hover:scale-105 transition-transform">
+                Вывести средства
+              </button>
+            </div>
+
+            {/* QR Code Section */}
+            <div className="bg-[#1A3C34] p-6 rounded-lg neon-glow mb-6">
+              <h3 className="text-xl text-[#00FF00] mb-4">QR-код для донатов</h3>
+              <div className="flex justify-center">
+                <img src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=http://localhost:3000/donate/${user.id}`} alt="QR Code" />
+              </div>
+              <p className="text-center mt-4 text-sm">Отсканируйте QR-код для донатов</p>
+            </div>
+
+            {/* Widget Customization Section */}
+            <div className="bg-[#1A3C34] p-6 rounded-lg neon-glow mb-6">
+              <h3 className="text-xl text-[#00FF00] mb-4">Настройка виджета для OBS</h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm mb-2">Цвет текста</label>
+                  <input
+                    type="color"
+                    value={widgetSettings.textColor}
+                    onChange={(e) => setWidgetSettings({ ...widgetSettings, textColor: e.target.value })}
+                    className="w-16 h-10"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm mb-2">Цвет фона</label>
+                  <input
+                    type="color"
+                    value={widgetSettings.backgroundColor === 'transparent' ? '#000000' : widgetSettings.backgroundColor}
+                    onChange={(e) => setWidgetSettings({ ...widgetSettings, backgroundColor: e.target.value })}
+                    className="w-16 h-10"
+                  />
+                  <button
+                    onClick={() => setWidgetSettings({ ...widgetSettings, backgroundColor: 'transparent' })}
+                    className="ml-4 bg-gray-500 text-white px-2 py-1 rounded"
+                  >
+                    Прозрачный
+                  </button>
+                </div>
+                <div>
+                  <label className="block text-sm mb-2">Размер шрифта</label>
+                  <input
+                    type="range"
+                    min="16"
+                    max="48"
+                    value={parseInt(widgetSettings.fontSize)}
+                    onChange={(e) => setWidgetSettings({ ...widgetSettings, fontSize: `${e.target.value}px` })}
+                    className="w-full"
+                  />
+                  <span className="text-sm">{widgetSettings.fontSize}</span>
+                </div>
+                <div>
+                  <label className="block text-sm mb-2">Звук уведомления</label>
+                  <select
+                    value={widgetSettings.soundEffect}
+                    onChange={(e) => setWidgetSettings({ ...widgetSettings, soundEffect: e.target.value })}
+                    className="w-full p-2 bg-white text-black rounded"
+                  >
+                    <option value="coins">Монетки</option>
+                    <option value="applause">Аплодисменты</option>
+                    <option value="bell">Колокольчик</option>
+                  </select>
+                </div>
+                <button onClick={handleWidgetUpdate} className="w-full bg-[#00FF00] text-black p-3 rounded neon-glow hover:scale-105 transition-transform">
+                  Сохранить настройки
+                </button>
+              </div>
+              <p className="text-sm mt-4">URL: <a href={`/widget.html?userId=${user.id}`} target="_blank" className="text-[#00FF00] underline">http://localhost:3000/widget.html?userId={user.id}</a></p>
+              <p className="text-sm">Добавьте этот URL в OBS как Browser Source.</p>
+            </div>
+
+            {/* Chat Section */}
+            <div className="bg-[#1A3C34] p-6 rounded-lg neon-glow mb-6">
+              <h3 className="text-xl text-[#00FF00] mb-4">Чат с подписчиками</h3>
+              <div className="chat-container" ref={chatRef}>
+                {messages.map((msg, index) => (
+                  <div key={index} className={`text-sm mb-2 ${msg.from === user.id ? 'text-right' : 'text-left'}`}>
+                    <span className={msg.from === user.id ? 'text-[#00FF00]' : 'text-white'}>
+                      {msg.from === user.id ? 'Вы' : 'Подписчик'}: {msg.content}
+                    </span>
+                    <span className="block text-xs opacity-50">{new Date(msg.timestamp).toLocaleTimeString()}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-4 flex space-x-2">
+                <input
+                  type="text"
+                  value={chatMessage}
+                  onChange={(e) => setChatMessage(e.target.value)}
+                  placeholder="Сообщение..."
+                  className="flex-1 p-2 bg-white text-black rounded"
+                />
+                <button
+                  onClick={handleSendMessage}
+                  className="bg-[#00FF00] text-black px-4 py-2 rounded neon-glow hover:scale-105 transition-transform"
+                >
+                  Отправить
+                </button>
+              </div>
+            </div>
+
+            {/* History Section */}
+            <div className="bg-[#1A3C34] p-6 rounded-lg neon-glow">
+              <h3 className="text-xl text-[#00FF00] mb-4">История транзакций</h3>
+              {history.length > 0 ? (
+                <ul className="space-y-2">
+                  {history.map(tx => (
+                    <li key={tx.id} className="flex justify-between text-sm">
+                      <span>{new Date(tx.created_at).toLocaleDateString()}</span>
+                      <span>{tx.amount} ₽ {tx.message ? `(${tx.message})` : ''}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm">Пока нет транзакций.</p>
+              )}
+            </div>
+          </div>
+        </section>
+      );
+    };
+
+    // Donate Page
+    const DonatePage = ({ user, messages, sendMessage }) => {
+      const [amount, setAmount] = useState('');
+      const [message, setMessage] = useState('');
+      const [streamer, setStreamer] = useState(null);
+      const [chatMessage, setChatMessage] = useState('');
+      const chatRef = useRef(null);
+
+      useEffect(() => {
+        fetch('http://localhost:3000/user/1')
+          .then(res => res.json())
+          .then(data => setStreamer(data));
+      }, []);
+
+      useEffect(() => {
+        if (chatRef.current) {
+          chatRef.current.scrollTop = chatRef.current.scrollHeight;
+        }
+      }, [messages]);
+
+      const handleDonate = async (e) => {
+        e.preventDefault();
+        if (!amount || amount <= 0) {
+          alert('Введите корректную сумму');
+          return;
+        }
+        const res = await fetch('http://localhost:3000/donate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          },
+          body: JSON.stringify({ amount: parseInt(amount), streamerId: 1, message }),
+        });
+        if (res.status === 200) {
+          alert('Донат отправлен!');
+          setAmount('');
+          setMessage('');
+        } else {
+          alert('Ошибка при отправке доната');
+        }
+      };
+
+      const handleSendMessage = () => {
+        if (chatMessage.trim()) {
+          sendMessage(1, chatMessage);
+          setChatMessage('');
+        }
+      };
+
+      if (!streamer) return <div className="text-center py-20">Загрузка...</div>;
+
+      return (
+        <section className="flex items-center justify-center py-20 min-h-[80vh] px-4">
+          <div className="bg-[#1A3C34] p-8 rounded-lg neon-glow max-w-md w-full">
+            <div className="flex justify-center mb-6">
+              <div className="w-24 h-24 rounded-full border-2 border-[#00FF00] flex items-center justify-center">
+                {streamer.avatar ? (
+                  <img src={streamer.avatar} alt="Avatar" className="w-full h-full rounded-full object-cover" />
+                ) : (
+                  <i className="fas fa-user text-4xl"></i>
+                )}
+              </div>
+            </div>
+            <h2 className="text-xl text-[#00FF00] mb-4 text-center">Стример: {streamer.name || 'GamerPro'}</h2>
+            <p className="text-sm text-center mb-6">{streamer.description || 'Нет описания'}</p>
+            <div className="space-y-4">
+              <div className="flex space-x-2 justify-center">
+                {[100, 500, 1000].map(value => (
+                  <button
+                    key={value}
+                    onClick={() => setAmount(value.toString())}
+                    className={`px-4 py-2 rounded ${amount === value.toString() ? 'bg-[#00FF00] text-black' : 'bg-gray-500 text-white'} hover:scale-105 transition-transform`}
+                  >
+                    {value} ₽
+                  </button>
+                ))}
+              </div>
+              <input
+                type="number"
+                placeholder="Сумма доната (₽)"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="w-full p-3 bg-white text-black rounded"
+              />
+              <textarea
+                placeholder="Сообщение (например, 'Удачи на стриме!')"
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                className="w-full p-3 bg-white text-black rounded"
+              />
+              <button onClick={handleDonate} className="w-full bg-[#00FF00] text-black p-3 rounded neon-glow hover:scale-105 transition-transform">
+                Отправить донат
+              </button>
+            </div>
+            <div className="mt-6">
+              <h3 className="text-xl text-[#00FF00] mb-4">Чат со стримером</h3>
+              <div className="chat-container" ref={chatRef}>
+                {messages.map((msg, index) => (
+                  <div key={index} className={`text-sm mb-2 ${msg.from === user.id ? 'text-right' : 'text-left'}`}>
+                    <span className={msg.from === user.id ? 'text-[#00FF00]' : 'text-white'}>
+                      {msg.from === user.id ? 'Вы' : 'Стример'}: {msg.content}
+                    </span>
+                    <span className="block text-xs opacity-50">{new Date(msg.timestamp).toLocaleTimeString()}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-4 flex space-x-2">
+                <input
+                  type="text"
+                  value={chatMessage}
+                  onChange={(e) => setChatMessage(e.target.value)}
+                  placeholder="Сообщение..."
+                  className="flex-1 p-2 bg-white text-black rounded"
+                />
+                <button
+                  onClick={handleSendMessage}
+                  className="bg-[#00FF00] text-black px-4 py-2 rounded neon-glow hover:scale-105 transition-transform"
+                >
+                  Отправить
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      );
+    };
+
+    // Widget Page (for OBS)
+    const WidgetPage = () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const userId = urlParams.get('userId');
+      const [settings, setSettings] = useState(null);
+      const audioRef = useRef(new Audio());
+
+      useEffect(() => {
+        fetch(`http://localhost:3000/widget-settings/${userId}`)
+          .then(res => res.json())
+          .then(data => setSettings(data))
+          .catch(() => setSettings({ textColor: '#00FF00', backgroundColor: 'transparent', fontSize: '24px', soundEffect: 'coins' }));
+      }, []);
+
+      useEffect(() => {
+        if (userId && settings) {
+          const ws = new WebSocket('ws://localhost:8080');
+          ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.type === 'donation' && data.streamerId === parseInt(userId)) {
+              const donationDiv = document.getElementById('donation');
+              donationDiv.innerText = `Донат: ${data.amount} ₽ ${data.message ? '- ' + data.message : ''}`;
+              donationDiv.style.opacity = '1';
+              audioRef.current.src = `/sounds/${settings.soundEffect}.mp3`;
+              audioRef.current.play().catch(() => console.log('Ошибка воспроизведения звука'));
+              setTimeout(() => {
+                donationDiv.style.opacity = '0';
+              }, 5000);
+            }
+          };
+          return () => ws.close();
+        }
+      }, [userId, settings]);
+
+      if (!settings) return <div>Loading...</div>;
+
+      return (
+        <div style={{ background: settings.backgroundColor, height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div
+            id="donation"
+            style={{
+              color: settings.textColor,
+              fontSize: settings.fontSize,
+              fontFamily: "'Press Start 2P', cursive",
+              opacity: '0',
+              transition: 'opacity 1s',
+            }}
+          ></div>
+        </div>
+      );
+    };
+
+    // Render the App
+    ReactDOM.render(<App />, document.getElementById('root'));
+  </script>
+</body>
+</html>
